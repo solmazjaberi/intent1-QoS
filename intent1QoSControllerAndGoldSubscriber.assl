@@ -1,0 +1,515 @@
+//GoldLevelSubscriber added to the QoS intent
+
+AS AutonomicNetwork {
+  TYPES{VidACL, VoiceACL, DataACL}
+  VARS{string VidTag; string VoiceTag; string dataTag}
+	ASSELF_MANAGEMENT {
+		SELF_CONFIGURING {
+			FLUENT inAutonomicNetworkConfiguration { 	INITIATED_BY { EVENTS.TimeToConfiguration } TERMINATED_BY {	EVENTS.ConfigurationDone } }
+			MAPPING { CONDITIONS { inAutonomicNetworkConfiguration } DO_ACTIONS { ACTIONS.ConfigureAutonomicNetwork } }
+		        }//SELF_CONFIGURING
+	       } // ASSELF_MANAGEMENT
+
+  ASARCHITECTURE {
+    AELIST {AES.GoldLevelSubscriber, AES.Controller}
+      DIRECT_DEPENDENCIES { DEPENDENCY AES.GoldLevelSubscriber { AES.Controller }}
+     TRANSITIVE_DEPENDENCIES { DEPENDENCY AES.Controller {AES.GoldLevelSubscriber }}
+   GROUPS {
+     GROUP GoldLevel {
+     MEMBERS { AES.GoldLevelSubscriber, AES.Controller }
+      COUNCIL { AES.Controller }
+  }
+   }
+}//ASARCHITECTURE
+
+	ACTIONS {
+		ACTION IMPL Configuration {
+			TRIGGERS { EVENTS.ConfigurationDone }
+		}
+		ACTION ConfigureAutonomicNetwork {
+			GUARDS { ASSELF_MANAGEMENT.SELF_CONFIGURING.inAutonomicNetworkConfiguration }
+			DOES { call IMPL ACTIONS.Configuration }
+			ONERR_TRIGGERS { EVENTS.ConfigurationDenied }
+		}
+   } // ACTIONS
+
+	EVENTS {
+		EVENT TimeToConfiguration {ACTIVATION { PERIOD {	1 MIN } }DURATION { 500 MSEC	}	}
+		EVENT ConfigurationDone {	 DURATION { 500 MSEC	} }
+		EVENT ConfigurationDenied {  DURATION { 500 MSEC	} }
+	}//EVENTS
+
+}//AS
+
+ASIP{
+  MESSAGES{
+
+    MESSAGE MonitoringMessage{
+      SENDER {ANY} 	RECEIVER { ANY } PRIORITY { 1 } MSG_TYPE {TEXT} BODY{"MONITORING IN PROCESS"}
+      }
+    MESSAGE reconfigNotifMsg{
+        SENDER {ANY} 	RECEIVER { ANY } PRIORITY { 1 } MSG_TYPE {TEXT} BODY{"reconfiguration IN PROCESS"}
+        }
+
+    }//MESSAGES
+
+    CHANNELS{
+      CHANNEL PUBLIC_LINK{
+        ACCEPTS{ASIP.MESSAGES.MonitoringMessage , ASIP.MESSAGES.reconfigNotifMsg}
+        ACCESS{SEQUENTIAL}
+        DIRECTION{INOUT}
+      }
+    }
+
+    FUNCTIONS{
+      FUNCTION SendMonitoringMsg{
+        DOES{
+          ASIP.MESSAGES.MonitoringMessage >> ASIP.CHANNELS.PUBLIC_LINK
+          }
+        }
+
+      FUNCTION sendReconfigNotif{
+          DOES{
+            ASIP.MESSAGES.reconfigNotifMsg >> ASIP.CHANNELS.PUBLIC_LINK
+            }
+          }
+
+      FUNCTION receiveMonitoringMsg{
+          DOES{
+          ASIP.MESSAGES.MonitoringMessage << ASIP.CHANNELS.PUBLIC_LINK
+                }
+              }
+      FUNCTION receiveReconfigNotif{
+          DOES{
+            ASIP.MESSAGES.reconfigNotifMsg << ASIP.CHANNELS.PUBLIC_LINK
+                    }
+                  }
+
+      }//FUNCTIONS
+
+}//ASIP
+
+
+//=======================AES==================//
+AES{
+  AE Controller{
+
+    AESELF_MANAGEMENT {
+      SELF_CONFIGURING {
+        FLUENT inIdentifyTrafficType{ 
+					 INITIATED_BY { EVENTS.IPPacketReceived }
+					 TERMINATED_BY { EVENTS.TrafficIdentified } }
+        FLUENT InClassification{
+					 INITIATED_BY { EVENTS.TrafficReceived } 
+				   TERMINATED_BY { EVENTS.ClassificationDone} }
+        FLUENT InLabelingQoS {  
+					 INITIATED_BY { EVENTS.TimeToLabel }  
+					 TERMINATED_BY { EVENTS.QoSLabeled }  }
+        FLUENT InPolicing{
+					 INITIATED_BY { EVENTS.TimeToPolicing } 
+					 TERMINATED_BY { EVENTS.PolicingDone } }
+        FLUENT InMarking{ 
+				  	INITIATED_BY { EVENTS.TimeToMarking }  
+					 TERMINATED_BY { EVENTS.MarkingDone }  }
+        FLUENT InEvaluation{
+					 INITIATED_BY { EVENTS.TimeToEvaluatingQoS }  
+					 TERMINATED_BY { EVENTS.EvaluationDone }   }
+        FLUENT inQoSGoldSetting{
+					INITIATED_BY{EVENTS.EvaluationDone}
+					 TERMINATED_BY{EVENTS.QoSGoldSet}}
+
+        MAPPING {
+					 CONDITIONS {inIdentifyTrafficType }
+					 DO_ACTIONS { ACTIONS.IdentifyTraffic}   }
+        MAPPING { 
+					CONDITIONS { InClassification} 
+					DO_ACTIONS { ACTIONS.classifyPackets}  }
+        MAPPING {
+					 CONDITIONS {InLabelingQoS } 
+					  DO_ACTIONS { ACTIONS.LabelTraffic}   }
+        MAPPING {
+					 CONDITIONS {InPolicing}
+					  DO_ACTIONS { ACTIONS.policing}  }
+        MAPPING {
+					 CONDITIONS {InMarking }
+					 DO_ACTIONS { ACTIONS.MarkTraffic}   }
+        MAPPING { 
+					CONDITIONS {InEvaluation }
+				  DO_ACTIONS { ACTIONS.EvaluateQoS} }
+        MAPPING {
+				 CONDITIONS {inQoSGoldSetting}
+				 DO_ACTIONS{ACTIONS.setQoSGold}}
+            }//SELF_CONFIGURING
+
+      SELF_HEALING{
+        FLUENT inReconfiguration{   INITIATED_BY{EVENTS.timeToReconfigure} TERMINATED_BY{EVENTS.reconfigurationDone} }
+        FLUENT inBandwidthIncreaseGold{INITIATED_BY{EVENTS.TimeToIncreaseBandwidth} TERMINATED_BY{EVENTS.BandwidthIncreasedGold}}
+
+        MAPPING{ CONDITIONS{inReconfiguration}   DO_ACTIONS{ACTIONS.reconfigure} }
+        MAPPING{CONDITIONS{inBandwidthIncreaseGold} DO_ACTIONS{ACTIONS.increaseBandWidth}}
+            }//SELF_HEALING
+            
+      }//AESELF_MANAGEMENT
+
+FRIENDS {	  AELIST { AES.GoldLevelSubscriber }	}
+
+AEIP{
+        MESSAGES{
+          MESSAGE msgQoSGold{
+            SENDER { AES.Controller }
+            RECEIVER { AES.GoldLevelSubscriber }
+            MSG_TYPE {	TASK }
+          }
+        }//MESSAGES
+
+        CHANNELS{
+          CHANNEL GoldLink{ACCEPTS{AEIP.MESSAGES.msgQoSGold,AES.GoldLevelSubscriber.AEIP.MESSAGES.msgBandWidthIncrease } ACCESS{DIRECT}  DIRECTION{INOUT}}
+        }//CHANNELS
+
+        FUNCTIONS{
+          FUNCTION sendMsgQoSGold{
+            DOES{ AES.Controller.AEIP.MESSAGES.msgQoSGold >> AES.Controller.AEIP.CHANNELS.GoldLink }
+          }
+          FUNCTION receiveBandWidthMsg{
+              DOES{ AES.GoldLevelSubscriber.AEIP.MESSAGES.msgBandWidthIncrease << AES.Controller.AEIP.CHANNELS.GoldLink }
+          }
+        }//FUNCTIONS
+
+        MANAGED_ELEMENTS {
+          MANAGED_ELEMENT monitoringTool {
+            //we check header for the protocol number
+            INTERFACE_FUNCTION checkHeader { RETURNS { DECIMAL } }
+            INTERFACE_FUNCTION getCoS{
+                //+++++++++
+                PARAMETERS{INTEGER Tag }
+                //+++++++++
+                RETURNS{INTEGER}}
+            INTERFACE_FUNCTION checkSource{RETURNS {DECIMAL}}
+            INTERFACE_FUNCTION checkDestination{RETURNS{DECIMAL}}
+            INTERFACE_FUNCTION DeviceAddress{RETURNS{DECIMAL}}
+            INTERFACE_FUNCTION checkBandwidth{RETURNS{DECIMAL}}
+            INTERFACE_FUNCTION monitorQoS{}
+            INTERFACE_FUNCTION reportPerformanceRate{RETURNS{DECIMAL}}
+            }
+
+
+          }
+        } // AEIP
+
+      ACTIONS {
+
+        ACTION IdentifyTraffic{
+          PARAMETERS { string Tag; DECIMAL ProtocolNum }
+
+          GUARDS { AESELF_MANAGEMENT.SELF_CONFIGURING.inIdentifyTrafficType }
+          DOES { CALL AEIP.MANAGED_ELEMENTS.monitoringTool.checkHeader;
+                  // this number is for TCP protocol number which is used by video traffic
+                  IF ProtocolNum=6 THEN Tag="vid"; AS.VidTag="VidTag"
+                  END
+                  ELSE
+                  // this number is for UDP protocol number which is used by voice traffic
+                  IF ProtocolNum=17 THEN Tag="voice"; AS.VoiceTag="VoiceTag"
+                  END
+                  ELSE
+                  // this number is for RDP protocol number which is used by data traffic
+                  IF ProtocolNum=27 THEN Tag="data"; AS.dataTag="dataTag"
+                  END
+                  END
+                  END
+                   }
+          TRIGGERS { EVENTS.TrafficIdentified}
+        }
+
+
+        ACTION classifyPackets {
+          GUARDS {AESELF_MANAGEMENT.SELF_CONFIGURING.InClassification }
+          DOES {
+                  IF AS.VidTag= "VidTag" THEN CALL IMPL ACTIONS.createVidACL;
+                  SET METRICS.CoS.VALUE=4
+                  END
+                  ELSE
+                  IF AS.VoiceTag= "VoiceTag" THEN CALL IMPL ACTIONS.createVoiceACL;
+                  SET METRICS.CoS.VALUE=5
+                  END
+                  ELSE
+                  IF AS.dataTag= "dataTag" THEN CALL IMPL ACTIONS.createDataACL;
+                  SET METRICS.CoS.VALUE=1
+                  END
+                  END
+                  END
+
+                    }
+          TRIGGERS {EVENTS.ClassificationDone}
+          ONERR_TRIGGERS{EVENTS.defaultOption} //in case it is not possible to classify the traffic, default mode is activated
+        }
+
+        ACTION IMPL createVidACL {
+            GUARDS { AESELF_MANAGEMENT.SELF_CONFIGURING.InClassification }
+
+            TRIGGERS { EVENTS.VideoClassified}
+               }
+
+        ACTION IMPL createVoiceACL {
+            GUARDS { AESELF_MANAGEMENT.SELF_CONFIGURING.InClassification }
+
+            TRIGGERS { EVENTS.VoiceClassified}
+              }
+
+        ACTION IMPL createDataACL {
+           GUARDS { AESELF_MANAGEMENT.SELF_CONFIGURING.InClassification }
+
+           TRIGGERS { EVENTS.DataClassified}
+             }
+
+        ACTION LabelTraffic{
+           GUARDS{AESELF_MANAGEMENT.SELF_CONFIGURING.InLabelingQoS
+
+                }
+           DOES{  call IMPL ACTIONS.AssignQoSLabelChecked}
+           TRIGGERS{EVENTS.QoSLabeled}
+        }
+
+        Action IMPL AssignQoSLabelChecked{
+          RETURNS {  BOOLEAN  }
+          TRIGGERS{EVENTS.QoSLabeledChecked}
+        }
+
+
+        ACTION policing{
+          GUARDS{AESELF_MANAGEMENT.SELF_CONFIGURING.InPolicing}
+          DOES{
+            SET METRICS.bandwidthPolicer.value=5;
+            CALL AEIP.MANAGED_ELEMENTS.monitoringTool.checkSource;
+            CALL AEIP.MANAGED_ELEMENTS.monitoringTool.checkDestination;
+            CALL AEIP.MANAGED_ELEMENTS.monitoringTool.DeviceAddress;
+            CALL IMPL ACTIONS.InputAndOutput
+          }
+          TRIGGERS{EVENTS.PolicingDone}
+        }
+
+        ACTION IMPL InputAndOutput{
+          TRIGGERS{EVENTS.InputAndOutputIdentified}
+        }
+
+        ACTION MarkTraffic{
+          GUARDS{AESELF_MANAGEMENT.SELF_CONFIGURING.InMarking}
+          VARS{BOOLEAN policyRespected}
+          DOES{
+            CALL AEIP.MANAGED_ELEMENTS.monitoringTool.checkBandwidth;
+            CALL IMPL ACTIONS.checkPolicer;
+
+            IF policyRespected THEN CALL IMPL ACTIONS.PassPacket END
+            ELSE CALL IMPL ACTIONS.DropPacket
+            END
+            }
+          TRIGGERS{EVENTS.MarkingDone}
+        }
+
+        ACTION IMPL checkPolicer{
+          GUARDS{METRICS.bandwidthPolicer}
+
+          ENSURES{EVENTS.policyChecked}
+        }
+
+        ACTION IMPL PassPacket{
+          ENSURES{EVENTS.passed}
+        }
+
+        ACTION IMPL DropPacket{
+          GUARDS{NOT METRICS.bandwidthPolicer}
+          ENSURES{EVENTS.dropped}
+        }
+
+        ACTION EvaluateQoS{
+          GUARDS{AESELF_MANAGEMENT.SELF_CONFIGURING.InEvaluation}
+          VARS{DECIMAL performanceRate}
+          DOES{
+            CALL AEIP.MANAGED_ELEMENTS.monitoringTool.monitorQoS;
+            CALL ASIP.FUNCTIONS.SendMonitoringMsg;
+            performanceRate=CALL AEIP.MANAGED_ELEMENTS.monitoringTool.reportPerformanceRate;
+            CALL ASIP.FUNCTIONS.receiveMonitoringMsg
+
+          }
+          TRIGGERS{EVENTS.EvaluationDone}
+        }
+
+
+        ACTION setQoSGold{
+          GUARDS{AESELF_MANAGEMENT.SELF_CONFIGURING.inQoSGoldSetting}
+          VARS{BOOLEAN highPerformance}
+          DOES{highPerformance=true; CALL AEIP.FUNCTIONS.sendMsgQoSGold}
+          TRIGGERS{IF(not highPerformance) THEN EVENTS.timeToReconfigure  END}}
+
+
+        ACTION reconfigure{
+          GUARDS{AESELF_MANAGEMENT.SELF_HEALING.inReconfiguration}
+          DOES{
+            CALL ACTIONS.reconfigureAN
+          }
+          TRIGGERS{EVENTS.reconfigurationDone}
+          ONERR_TRIGGERS{EVENTS.reconfigurationFailed}
+        }
+        ACTION reconfigureAN{
+          DOES{CALL ASIP.FUNCTIONS.sendReconfigNotif;
+                CALL ASIP.FUNCTIONS.receiveReconfigNotif}
+          TRIGGERS{EVENTS.reconfigurationDone}
+        }
+
+        ACTION increaseBandWidth{
+          GUARDS{AESELF_MANAGEMENT.SELF_HEALING.inBandwidthIncreaseGold}
+          DOES{CALL IMPL ACTIONS.increaseGoldBandWidth}
+        }
+
+        ACTION IMPL increaseGoldBandWidth{
+          PARAMETERS{string SubscriberName}
+          TRIGGERS{IF SubscriberName="GoldLevelSubscriberAE" THEN EVENTS.BandwidthIncreasedGold END}          
+        }
+
+        }//ACTIONS
+
+      EVENTS {
+          EVENT IPPacketReceived{}
+          EVENT TrafficIdentified{}
+          EVENT TrafficReceived{ACTIVATION{OCCURRED{EVENTS.TrafficIdentified}}}
+          EVENT VideoClassified {  ACTIVATION { PERIOD { 1 min }  }}
+          EVENT VoiceClassified {ACTIVATION { PERIOD { 1 min } }  }
+          EVENT DataClassified {  ACTIVATION { PERIOD { 1 min } }   }
+          EVENT ClassificationDone {  }
+          EVENT TimeToLabel{   ACTIVATION { CHANGED { METRICS.CoS} OR  PERIOD {	60 SEC }}  }
+          EVENT QoSLabeled{}
+          EVENT QoSLabeledChecked{}
+          EVENT TimeToPolicing{ ACTIVATION{OCCURRED{EVENTS.QoSLabeledChecked}} }
+          EVENT PolicingDone{}
+          EVENT policyChecked{}
+			  EVENT InputAndOutputIdentified{ }
+          EVENT timeToReconfigure{}
+          EVENT TimeToMarking{ACTIVATION{OCCURRED{EVENTS.PolicingDone}}}
+          EVENT passed{}
+          EVENT dropped{}
+          EVENT TimeToEvaluatingQoS{ACTIVATION{OCCURRED{EVENTS.MarkingDone}}}
+          EVENT MarkingDone{}
+          EVENT EvaluationDone{}
+          EVENT reconfigurationDone{}
+          EVENT reconfigurationFailed{}
+          EVENT defaultOption{}
+          EVENT QoSGoldSet{}
+          EVENT TimeToIncreaseBandwidth{ACTIVATION{RECEIVED{AES.GoldLevelSubscriber.AEIP.MESSAGES.msgBandWidthIncrease}}}
+          EVENT BandwidthIncreasedGold{}
+                } // EVENTS
+
+      METRICS {
+            METRIC CoS {//class of service metric
+                  METRIC_TYPE { RESOURCE }
+                  METRIC_SOURCE { AEIP.MANAGED_ELEMENTS.monitoringTool.getCoS}
+                  DESCRIPTION { "class of service field" }
+                  MEASURE_UNIT { "" }
+                  VALUE {  }
+                  THRESHOLD_CLASS { INTEGER [0~7] }
+                      }
+
+            METRIC bandwidthPolicer {
+                  METRIC_TYPE { RESOURCE }
+                  METRIC_SOURCE { AEIP.MANAGED_ELEMENTS.monitoringTool.checkBandwidth}
+                  DESCRIPTION { "bandwidth" }
+                  MEASURE_UNIT { "Mbps" }
+                  VALUE {  }
+                  THRESHOLD_CLASS { DECIMAL [0~10] }
+                }
+
+                  }//METRICS
+
+  }//AE Controller
+
+  AE GoldLevelSubscriber{
+
+      AESELF_MANAGEMENT {
+        SELF_HEALING{
+           FLUENT inBandwidthReport{
+						INITIATED_BY{EVENTS.TimeToReportBandwidth}
+						 TERMINATED_BY{EVENTS.BandWidthIssueReported}}
+           MAPPING{
+						CONDITIONS{inBandwidthReport}
+						 DO_ACTIONS{ACTIONS.ReportBandWidthIssue}}
+                 }//SELF_HEALING
+
+        OTHER_POLICIES {
+
+          POLICY QoSGold{
+            FLUENT inQoSGold{
+						INITIATED_BY{EVENTS.TimeToInitiateQoS}
+						 TERMINATED_BY{EVENTS.QoSInitiated}}
+            FLUENT inMonitoringQoSGold{
+						INITIATED_BY{EVENTS.QoSInitiated}
+						 TERMINATED_BY{EVENTS.QoSGoldMonitored}}
+            MAPPING{
+						CONDITIONS{inQoSGold}
+						 DO_ACTIONS{ACTIONS.QoSGold}}
+            MAPPING{
+						CONDITIONS{inMonitoringQoSGold} 
+						DO_ACTIONS{ACTIONS.MonitorQoSGold}}
+            }
+          }//OTHER_POLICIES
+
+        }//AESELF_MANAGEMENT
+
+    FRIENDS {	  AELIST { AES.Controller }	}
+
+      AEIP{
+          MESSAGES{
+            MESSAGE msgBandWidthIncrease{
+              SENDER {AES.GoldLevelSubscriber} 	RECEIVER { AES.Controller } PRIORITY { 1 } MSG_TYPE {TEXT} BODY{"Increase Bandwidth"}
+            }
+          }
+          FUNCTIONS{
+            FUNCTION receiveMsgQoSGold{
+              DOES{AES.Controller.AEIP.MESSAGES.msgQoSGold << AES.Controller.AEIP.CHANNELS.GoldLink}
+            }
+
+            FUNCTION sendBandwidthMsg{
+              DOES{AEIP.MESSAGES.msgBandWidthIncrease >> AES.Controller.AEIP.CHANNELS.GoldLink}
+            }
+
+          }
+      MANAGED_ELEMENTS {
+          MANAGED_ELEMENT GoldQoSMonitoring{
+            INTERFACE_FUNCTION reportBandwidth{}
+            INTERFACE_FUNCTION reportQoSPerformance{}
+          }
+           }
+      }//AEIP
+
+      ACTIONS{
+        ACTION QoSGold{
+          GUARDS{ AESELF_MANAGEMENT.OTHER_POLICIES.QoSGold.inQoSGold}
+          DOES{CALL AEIP.FUNCTIONS.receiveMsgQoSGold}
+          TRIGGERS{EVENTS.QoSInitiated}
+        }
+        ACTION MonitorQoSGold{
+          GUARDS{AESELF_MANAGEMENT.OTHER_POLICIES.QoSGold.inMonitoringQoSGold}
+          VARS{BOOLEAN highBandwidth}
+          DOES{highBandwidth=true;
+               CALL AEIP.MANAGED_ELEMENTS.GoldQoSMonitoring.reportBandwidth;
+               CALL AEIP.MANAGED_ELEMENTS.GoldQoSMonitoring.reportQoSPerformance
+          }
+          TRIGGERS{IF(not highBandwidth) THEN EVENTS.TimeToReportBandwidth END}
+        }
+
+        ACTION ReportBandWidthIssue{
+          GUARDS{AESELF_MANAGEMENT.SELF_HEALING.inBandwidthReport}
+          DOES{CALL AEIP.FUNCTIONS.sendBandwidthMsg}
+        }
+
+      }//ACTIONS
+
+      EVENTS{
+        EVENT TimeToInitiateQoS{}
+        EVENT QoSInitiated{}
+        EVENT QoSGoldMonitored{}
+        EVENT TimeToReportBandwidth{}
+        EVENT BandWidthIssueReported{ACTIVATION{SENT{AEIP.MESSAGES.msgBandWidthIncrease}}}
+
+      }//EVENTS
+  }//GoldLevelSubscriber
+
+
+}//AES
